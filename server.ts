@@ -6,89 +6,72 @@ import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import multer from 'multer';
-import { initializeApp, getApps, getApp, cert } from 'firebase-admin/app';
+import { initializeApp, getApps, getApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
-import { getStorage } from 'firebase-admin/storage';
+import { getStorage, ref, uploadBytes, getBytes } from 'firebase-admin/storage';
 
 dotenv.config();
 
 // Handle __dirname gracefully for both ESM and CJS
 const resolvedDirname = typeof __dirname !== 'undefined' ? __dirname : process.cwd();
 
-// Initialize Firebase Admin SDK
+// Initialize Firebase Admin SDK on server-side with fallback for external cloud deployments
 let firebaseConfig: any = {};
 try {
-  const configContent = readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf8');
-  firebaseConfig = JSON.parse(configContent);
+  firebaseConfig = JSON.parse(readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf8'));
 } catch (e) {
-  console.log("INFO: firebase-applet-config.json not found. Using environment variables.");
+  console.log("INFO: firebase-applet-config.json not found or could not be read. Falling back to environment variables.");
   firebaseConfig = {
-    projectId: process.env.FIREBASE_PROJECT_ID,
+    projectId: process.env.FIREBASE_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT,
+    firestoreDatabaseId: process.env.FIREBASE_DATABASE_ID,
     storageBucket: process.env.FIREBASE_STORAGE_BUCKET
   };
 }
 
-// Support for Service Account via Environment Variable (Base64 or JSON string)
-let serviceAccount: any = null;
-if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-  try {
-    const decoded = process.env.FIREBASE_SERVICE_ACCOUNT.startsWith('{') 
-      ? process.env.FIREBASE_SERVICE_ACCOUNT 
-      : Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT, 'base64').toString('utf8');
-    serviceAccount = JSON.parse(decoded);
-    console.log("Firebase Service Account loaded from environment variable.");
-  } catch (err) {
-    console.error("Error parsing FIREBASE_SERVICE_ACCOUNT env var:", err);
-  }
-}
-
-const adminApp = getApps().length === 0
-  ? initializeApp({
-      credential: serviceAccount ? cert(serviceAccount) : undefined,
-      projectId: firebaseConfig.projectId || undefined,
-      storageBucket: firebaseConfig.storageBucket || (firebaseConfig.projectId ? `${firebaseConfig.projectId}.firebasestorage.app` : undefined)
-    })
+const app = getApps().length === 0
+  ? initializeApp({ projectId: firebaseConfig.projectId || undefined })
   : getApp();
 
-const db = getFirestore(adminApp);
-db.settings({ ignoreUndefinedProperties: true });
+const db = firebaseConfig.firestoreDatabaseId
+  ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
+  : getFirestore(app);
 
-// Configure Firebase Admin Cloud Storage Bucket
-let bucket: any = null;
+db.settings({
+  ignoreUndefinedProperties: true
+});
+
+// Initialize Firebase Storage
+let storage: any = null;
 try {
-  const bucketName = firebaseConfig.storageBucket || (firebaseConfig.projectId ? `${firebaseConfig.projectId}.firebasestorage.app` : undefined);
-  if (bucketName) {
-    bucket = getStorage(adminApp).bucket(bucketName);
-    console.log(`Firebase Storage bucket initialized: ${bucketName}`);
-  }
-} catch (err: any) {
-  console.error('Firebase Storage initialization error:', err.message);
+  storage = getStorage(app);
+  console.log("Firebase Storage initialized successfully");
+} catch (e) {
+  console.warn("Firebase Storage initialization warning:", e);
 }
 
-// Test Firestore Connection
-let isFirestoreAccessible = false;
+// Mandated Firebase validation check
 async function testFirestoreConnection() {
   try {
-    await db.collection('classroom_config').doc('healthcheck').set({ lastSeen: new Date().toISOString() }, { merge: true });
-    isFirestoreAccessible = true;
-    console.log("Firestore connection verified!");
-  } catch (error: any) {
-    isFirestoreAccessible = false;
-    console.warn("Firestore access limited. Using local fallback for data.");
+    await db.collection('classroom_config').doc('completed_lessons').get();
+    console.log("Firestore Cloud Database connection successfully verified!");
+  } catch (error) {
+    console.error("Firestore startup connection tested with error:", error);
   }
 }
 testFirestoreConnection();
 
-// Multer configuration
+// Configure multer for file storage (in-memory for Firebase upload)
 const upload = multer({ 
   storage: multer.memoryStorage(),
-  limits: { fileSize: 100 * 1024 * 1024 },
+  limits: { fileSize: 100 * 1024 * 1024 }, // Increased to 100MB for high-quality videos
   fileFilter: (req, file, cb) => {
     const filetypes = /png|jpg|jpeg|webp|mp4|webm|mov/;
     const mimetype = filetypes.test(file.mimetype);
     const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
-    if (mimetype && extname) return cb(null, true);
-    cb(new Error('Only image or video files are allowed!'));
+    if (mimetype && extname) {
+      return cb(null, true);
+    }
+    cb(new Error('Only image (PNG, JPG, WEBP) or video (MP4, WEBM, MOV) files are allowed!'));
   }
 });
 
@@ -97,157 +80,384 @@ async function startServer() {
   app.use(express.json({ limit: '200mb' }));
   app.use(express.urlencoded({ limit: '200mb', extended: true }));
 
-  // Ensure uploads directory exists for local fallback
-  const publicUploads = path.join(process.cwd(), 'public', 'uploads');
-  if (!existsSync(publicUploads)) mkdirSync(publicUploads, { recursive: true });
-  
-  // Serve uploads
-  app.use('/uploads', express.static(publicUploads));
-  const distUploads = path.join(process.cwd(), 'dist', 'uploads');
-  if (existsSync(distUploads)) app.use('/uploads', express.static(distUploads));
+  // Static serving for default blocks from public folder
+  const publicPath = path.join(process.cwd(), 'public');
+  if (existsSync(publicPath)) {
+    app.use(express.static(publicPath));
+  }
 
-  // Config Paths
-  const configPath = path.join(publicUploads, 'home_blocks_config.json');
-  const coursesConfigPath = path.join(publicUploads, 'courses_config.json');
-  const classroomDbPath = path.join(publicUploads, 'classroom_db.json');
+  // Setup Gemini client
+  const apiKey = process.env.GEMINI_API_KEY;
+  const ai = new GoogleGenAI({
+    apiKey: apiKey || '',
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      }
+    }
+  });
 
-  // Helper: Get Home Config
-  const getHomeConfig = async () => {
-    try {
-      const doc = await db.collection('site_config').doc('home_blocks').get();
-      if (doc.exists) return doc.data();
-    } catch (e) {}
-    try {
-      if (existsSync(configPath)) return JSON.parse(await fs.readFile(configPath, 'utf8'));
-    } catch (e) {}
-    return {};
+  // API router/endpoints
+  const configPath = path.join(process.cwd(), 'public', 'uploads', 'home_blocks_config.json');
+  const coursesConfigPath = path.join(process.cwd(), 'public', 'uploads', 'courses_config.json');
+  const classroomDbPath = path.join(process.cwd(), 'public', 'uploads', 'classroom_db.json');
+
+  const defaultClassroomData = {
+    students: [
+      {
+        id: "s1",
+        email: "student@synthetica.art",
+        password: "student123",
+        fullName: "Иван Кузнецов",
+        allowedCourses: ["course_marketing"],
+        allowedModules: {
+          course_marketing: ["01", "02", "03"]
+        },
+        isMentorshipMember: true,
+        allowedBonusCourses: ["contact_me"],
+        allowedBonusModules: {
+          contact_me: ["01", "02"]
+        }
+      },
+      {
+        id: "s2",
+        email: "nina@synthetica.art",
+        password: "123456",
+        fullName: "Нина Тарасова",
+        allowedCourses: ["course_midjourney", "future_agents"],
+        allowedModules: {
+          course_midjourney: ["01", "02", "03"],
+          future_agents: ["01"]
+        }
+      }
+    ],
+    completedLessons: {},
+    submissions: []
   };
 
-  // API: Upload
-  app.post('/api/upload', (req, res) => {
-    upload.single('image')(req, res, async (err) => {
-      if (err) return res.status(400).json({ error: err.message });
-      if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  const getClassroomData = async () => {
+    try {
+      const studentsSnapshot = await db.collection('students').get();
+      const studentsList: any[] = [];
+      studentsSnapshot.forEach(docSnap => {
+        studentsList.push({ id: docSnap.id, ...docSnap.data() });
+      });
 
-      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-      const fileExt = path.extname(req.file.originalname).toLowerCase();
-      const fileName = `uploads/${uniqueSuffix}${fileExt}`;
+      const submissionsSnapshot = await db.collection('submissions').get();
+      const submissionsList: any[] = [];
+      submissionsSnapshot.forEach(docSnap => {
+        submissionsList.push({ id: docSnap.id, ...docSnap.data() });
+      });
 
-      // 1. Try Firebase Storage
-      if (bucket) {
-        try {
-          const fileRef = bucket.file(fileName);
-          await fileRef.save(req.file.buffer, {
-            metadata: { contentType: req.file.mimetype },
-            public: true // Attempt to make public during save
-          });
+      // Sort submissions chronologically descending
+      submissionsList.sort((a, b) => {
+        const tA = new Date(a.submittedAt || 0).getTime();
+        const tB = new Date(b.submittedAt || 0).getTime();
+        return tB - tA;
+      });
 
-          // Fallback to makePublic if the bucket allows it
-          try { await fileRef.makePublic(); } catch (e) {}
+      const completedDoc = await db.collection('classroom_config').doc('completed_lessons').get();
+      const completedLessons = completedDoc.exists ? (completedDoc.data()?.data || {}) : {};
 
-          const publicUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
-          console.log('Uploaded to Firebase Storage:', publicUrl);
-          return res.json({ url: publicUrl });
-        } catch (storageErr: any) {
-          console.error('Firebase Storage upload failed:', storageErr.message);
+      // Bootstrap with default data if both students and submissions are completely empty
+      if (studentsList.length === 0) {
+        console.log('Bootstrapping Firestore database with starter students...');
+        for (const s of defaultClassroomData.students) {
+          const { id, ...rest } = s;
+          await db.collection('students').doc(id).set(rest);
+          studentsList.push(s);
+        }
+        await db.collection('classroom_config').doc('completed_lessons').set({ data: defaultClassroomData.completedLessons });
+      }
+
+      return {
+        students: studentsList,
+        completedLessons,
+        submissions: submissionsList
+      };
+    } catch (e) {
+      console.error('Error reading from live Firestore, falling back to local file backup:', e);
+      try {
+        if (existsSync(classroomDbPath)) {
+          const data = await fs.readFile(classroomDbPath, 'utf8');
+          if (data && data.trim()) {
+            return JSON.parse(data);
+          }
+        }
+      } catch (errBackup) {
+        console.error('Local backup read failed too:', errBackup);
+      }
+    }
+    return defaultClassroomData;
+  };
+
+  const saveClassroomData = async (data: any) => {
+    let firestoreSuccess = false;
+    try {
+      // 1. Write students
+      if (data && Array.isArray(data.students)) {
+        for (const s of data.students) {
+          const { id, ...rest } = s;
+          if (id) {
+            await db.collection('students').doc(id).set(rest);
+          }
         }
       }
 
-      // 2. Local Fallback (Ephemeral)
-      try {
-        const diskFileName = `${uniqueSuffix}${fileExt}`;
-        const diskPath = path.join(publicUploads, diskFileName);
-        await fs.writeFile(diskPath, req.file.buffer);
-        console.warn('Saved to local fallback (will be lost on restart):', diskFileName);
-        return res.json({ url: `/uploads/${diskFileName}` });
-      } catch (writeErr: any) {
-        return res.status(500).json({ error: 'Failed to save file' });
+      // 2. Write submissions
+      if (data && Array.isArray(data.submissions)) {
+        for (const sub of data.submissions) {
+          const { id, ...rest } = sub;
+          if (id) {
+            await db.collection('submissions').doc(id).set(rest);
+          }
+        }
       }
-    });
+
+      // 3. Write completed progress map
+      if (data && data.completedLessons) {
+        await db.collection('classroom_config').doc('completed_lessons').set({ data: data.completedLessons });
+      }
+      firestoreSuccess = true;
+    } catch (err) {
+      console.error('Error writing database state to Firestore, using local file fallback:', err);
+    }
+
+    // Always update local file backup for extra high redundancy and standalone operation
+    try {
+      await fs.writeFile(classroomDbPath, JSON.stringify(data, null, 2), 'utf8');
+      return true;
+    } catch (errBackup) {
+      console.error('Local JSON backup write failed:', errBackup);
+      if (!firestoreSuccess) {
+        throw errBackup;
+      }
+    }
+    return firestoreSuccess;
+  };
+
+  const getHomeConfig = async () => {
+    try {
+      if (existsSync(configPath)) {
+        const data = await fs.readFile(configPath, 'utf8');
+        if (data && data.trim()) {
+          return JSON.parse(data);
+        }
+      }
+    } catch (e) {
+      console.error('Error reading home blocks config:', e);
+    }
+    return {};
+  };
+
+  const getCoursesConfig = async () => {
+    try {
+      if (existsSync(coursesConfigPath)) {
+        const data = await fs.readFile(coursesConfigPath, 'utf8');
+        if (data && data.trim()) {
+          return JSON.parse(data);
+        }
+      }
+    } catch (e) {
+      console.error('Error reading courses config:', e);
+    }
+    return {};
+  };
+
+  const injectHomeConfig = (html: string, config: any) => {
+    const script = `<script>window.__HOME_BLOCKS_CONFIG__ = ${JSON.stringify(config)};</script>`;
+    return html.replace('</head>', `${script}</head>`);
+  };
+
+  // API 404 handler for missing routes BEFORE general catch-alls but AFTER real routes
+  app.get('/api/config/home-blocks', async (req, res) => {
+    const data = await getHomeConfig();
+    res.json(data);
   });
 
-  // API: Configs
-  app.get('/api/config/home-blocks', async (req, res) => res.json(await getHomeConfig()));
   app.post('/api/config/home-blocks', async (req, res) => {
     try {
-      await db.collection('site_config').doc('home_blocks').set(req.body);
-      await fs.writeFile(configPath, JSON.stringify(req.body, null, 2));
+      await fs.writeFile(configPath, JSON.stringify(req.body, null, 2), 'utf8');
       res.json({ success: true });
-    } catch (err) { res.status(500).json({ error: 'Failed to save' }); }
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to save config' });
+    }
   });
 
-  // API: Courses
   app.get('/api/config/courses', async (req, res) => {
-    try {
-      const doc = await db.collection('site_config').doc('courses').get();
-      if (doc.exists) return res.json(doc.data());
-    } catch (e) {}
-    try {
-      if (existsSync(coursesConfigPath)) return res.json(JSON.parse(await fs.readFile(coursesConfigPath, 'utf8')));
-    } catch (e) {}
-    res.json({});
+    const data = await getCoursesConfig();
+    res.json(data);
   });
 
   app.post('/api/config/courses', async (req, res) => {
     try {
-      await db.collection('site_config').doc('courses').set(req.body);
-      await fs.writeFile(coursesConfigPath, JSON.stringify(req.body, null, 2));
+      await fs.writeFile(coursesConfigPath, JSON.stringify(req.body, null, 2), 'utf8');
       res.json({ success: true });
-    } catch (err) { res.status(500).json({ error: 'Failed to save' }); }
-  });
-
-  // API: Chat (Gemini)
-  const ai = new GoogleGenAI(process.env.GEMINI_API_KEY || '');
-  app.post('/api/chat', async (req, res) => {
-    const { message, history } = req.body;
-    if (!process.env.GEMINI_API_KEY) return res.status(500).json({ error: 'Gemini API key missing' });
-    try {
-      const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
-      const chat = model.startChat({
-        history: (history || []).map((m: any) => ({
-          role: m.role === 'user' ? 'user' : 'model',
-          parts: [{ text: m.content }]
-        })),
-        systemInstruction: "Вы — ассистент Ирины SYNTHETICA. Отвечайте на русском языке.",
-      });
-      const result = await chat.sendMessage(message);
-      res.json({ text: result.response.text() });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to save courses config' });
     }
   });
 
-  // Production Serving
+  app.get('/api/classroom/data', async (req, res) => {
+    const data = await getClassroomData();
+    res.json(data);
+  });
+
+  app.post('/api/classroom/data', async (req, res) => {
+    try {
+      await saveClassroomData(req.body);
+      res.json({ success: true });
+    } catch (err) {
+      console.error('Error saving classroom db to live Firestore:', err);
+      res.status(500).json({ error: 'Failed to save classroom data' });
+    }
+  });
+
+  app.post('/api/upload', (req, res) => {
+    upload.single('image')(req, res, async (err) => {
+      if (err) {
+        console.error('Multer error:', err);
+        return res.status(err instanceof multer.MulterError ? 400 : 500).json({ 
+          error: err.message || 'Upload failed' 
+        });
+      }
+      if (!req.file) {
+        return res.status(400).json({ error: 'No file uploaded' });
+      }
+
+      // Try Firebase Storage first
+      if (storage) {
+        try {
+          const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+          const fileName = `uploads/${req.file.fieldname}-${uniqueSuffix}${path.extname(req.file.originalname)}`;
+          const storageRef = ref(storage, fileName);
+          
+          await uploadBytes(storageRef, req.file.buffer, {
+            contentType: req.file.mimetype
+          });
+
+          // Generate public URL (Firebase Storage public access)
+          const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${firebaseConfig.storageBucket}/o/${encodeURIComponent(fileName)}?alt=media`;
+          console.log('File uploaded to Firebase Storage:', publicUrl);
+          return res.json({ url: publicUrl });
+        } catch (firebaseErr) {
+          console.error('Firebase Storage upload failed, falling back to local storage:', firebaseErr);
+        }
+      }
+
+      // Fallback: save to local disk (for development or if Firebase is unavailable)
+      try {
+        const uploadDir = path.join(process.cwd(), 'public', 'uploads');
+        if (!existsSync(uploadDir)) {
+          mkdirSync(uploadDir, { recursive: true });
+        }
+        
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        const fileName = req.file.fieldname + '-' + uniqueSuffix + path.extname(req.file.originalname);
+        const filePath = path.join(uploadDir, fileName);
+        
+        await fs.writeFile(filePath, req.file.buffer);
+        
+        const publicUrl = `/uploads/${fileName}`;
+        console.log('File uploaded to local storage (fallback):', publicUrl);
+        return res.json({ url: publicUrl });
+      } catch (localErr) {
+        console.error('Local storage fallback also failed:', localErr);
+        return res.status(500).json({ error: 'Upload failed on both Firebase and local storage' });
+      }
+    });
+  });
+
+  app.post('/api/chat', async (req, res) => {
+    const { message, history } = req.body;
+    if (!message) {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+
+    if (!apiKey) {
+      return res.status(500).json({ 
+        error: 'Gemini API key is not configured in your environment secrets. Please configure it in Settings > Secrets in the Google AI Studio panel.' 
+      });
+    }
+
+    try {
+      // Build conversation structures complying with @google/genai format
+      const pastParts = history ? history.map((msg: { role: string; content: string }) => ({
+        role: msg.role === 'user' ? 'user' : 'model',
+        parts: [{ text: msg.content }]
+      })) : [];
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.5-flash',
+        contents: [
+          ...pastParts,
+          { role: 'user', parts: [{ text: message }] }
+        ],
+        config: {
+          systemInstruction: 'Вы — высококлассный интерактивный ИИ-ассистент Ирины SYNTHETICA (генеративного дизайнера, маркетолога и ментора). Вы находитесь на её портфолио-сайте и помогаете посетителям узнать больше о её услугах, курсах (Мини-курс по Midjourney & Stable Diffusion, Мини-курс по Нейромаркетингу), наставничестве и возможностях сотрудничества. Общайтесь профессионально, креативно, вдохновляюще и дружелюбно на русском языке (или на английском, если пользователь пишет на английском). Отвечайте структурировано, лаконично, укладываясь в 2-4 абзаца, с использованием красивой разметки markdown и эмодзи.',
+        }
+      });
+
+      return res.json({ text: response.text });
+    } catch (error: any) {
+      console.error('Gemini API Error:', error);
+      return res.status(500).json({ error: error.message || 'Error communicating with Gemini' });
+    }
+  });
+
+  // API 404 handler - catch missing API routes before they hit the SPA fallback
+  app.all('/api/*', (req, res) => {
+    res.status(404).json({ error: `API route not found: ${req.method} ${req.url}` });
+  });
+
   const isProd = process.env.NODE_ENV === 'production';
+  
   if (isProd) {
+    // Serve static compiled UI files in production
     const distPath = path.resolve(process.cwd(), 'dist');
     app.use(express.static(distPath, { index: false }));
     app.get('*', async (req, res) => {
       try {
         let template = await fs.readFile(path.join(distPath, 'index.html'), 'utf-8');
         const config = await getHomeConfig();
-        const script = `<script>window.__HOME_BLOCKS_CONFIG__ = ${JSON.stringify(config)};</script>`;
-        template = template.replace('</head>', `${script}</head>`);
+        template = injectHomeConfig(template, config);
         res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
-      } catch (e) { res.status(500).end('Error'); }
+      } catch (e) {
+        res.status(500).end('Internal Server Error');
+      }
     });
   } else {
-    const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'custom' });
+    // Set up Vite dev server in middleware mode for development
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'custom',
+    });
+    
     app.use(vite.middlewares);
+    
+    // Serve index.html dynamically with SSR transforms
     app.get('*', async (req, res, next) => {
+      const url = req.originalUrl;
       try {
         let template = await fs.readFile(path.resolve(resolvedDirname, 'index.html'), 'utf-8');
-        template = await vite.transformIndexHtml(req.originalUrl, template);
+        template = await vite.transformIndexHtml(url, template);
         const config = await getHomeConfig();
-        const script = `<script>window.__HOME_BLOCKS_CONFIG__ = ${JSON.stringify(config)};</script>`;
-        template = template.replace('</head>', `${script}</head>`);
+        template = injectHomeConfig(template, config);
         res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
-      } catch (e) { next(e); }
+      } catch (e: any) {
+        vite.ssrFixStacktrace(e as Error);
+        next(e);
+      }
     });
   }
 
   const port = process.env.PORT || 3000;
-  app.listen(Number(port), '0.0.0.0', () => console.log(`Server running on port ${port}`));
+  app.listen(Number(port), '0.0.0.0', () => {
+    console.log(`Server running at http://0.0.0.0:${port}`);
+  });
 }
 
-startServer();
+startServer().catch(err => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
+});

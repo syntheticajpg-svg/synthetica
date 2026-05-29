@@ -29,8 +29,17 @@ export default function CourseBuilder({ course, onClose, customConfig, onSaveCon
 
     setIsUploading(true);
     try {
+      let fileToUpload = file;
+      if (file.type.startsWith('image/')) {
+        try {
+          fileToUpload = await compressImage(file, 0.5); // Target ~500KB
+        } catch (compErr) {
+          console.warn("Compression failed, using original", compErr);
+        }
+      }
+
       const formData = new FormData();
-      formData.append("image", file);
+      formData.append("image", fileToUpload);
 
       const res = await fetch("/api/upload", {
         method: "POST",

@@ -49,7 +49,7 @@ export default function HomeBlockEditorModal({
     if (!file) return;
     setUploading(true);
     try {
-      // Compress image before sending as Base64 to keep Firestore payload small
+      // Compress image before sending to Firebase Storage to reduce bandwidth
       let fileToUpload = file;
       if (file.type.startsWith('image/')) {
         try {

@@ -26,10 +26,14 @@ try {
 }
 
 const adminApp = getApps().length === 0
-  ? initializeApp({ projectId: firebaseConfig.projectId || undefined })
+  ? initializeApp({ 
+      projectId: firebaseConfig.projectId || undefined,
+      storageBucket: firebaseConfig.storageBucket || `${firebaseConfig.projectId}.appspot.com`
+    })
   : getApp();
 
 const db = getFirestore(adminApp);
+const storage = adminApp.storage();
 db.settings({ ignoreUndefinedProperties: true });
 
 // Test Firestore Connection
@@ -64,21 +68,30 @@ async function startServer() {
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-  // API: Upload (Base64 Method)
+  // API: Upload (Firebase Storage Method)
   app.post('/api/upload', (req, res) => {
     upload.single('image')(req, res, async (err) => {
       if (err) return res.status(400).json({ error: err.message });
       if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
       try {
-        // Convert buffer to Base64 string
-        const base64Data = req.file.buffer.toString('base64');
-        const dataUrl = `data:${req.file.mimetype};base64,${base64Data}`;
+        const bucket = storage.bucket();
+        const filename = `uploads/${Date.now()}-${req.file.originalname}`;
+        const file = bucket.file(filename);
+
+        await file.save(req.file.buffer, {
+          metadata: { contentType: req.file.mimetype },
+          public: true
+        });
+
+        // Use the direct public URL for Firebase Storage
+        const publicUrl = `https://storage.googleapis.com/${bucket.name}/${filename}`;
         
-        console.log('File converted to Base64 for permanent storage in Firestore config');
-        return res.json({ url: dataUrl });
+        console.log('File uploaded to Firebase Storage:', publicUrl);
+        return res.json({ url: publicUrl });
       } catch (writeErr: any) {
-        return res.status(500).json({ error: 'Failed to process image' });
+        console.error('Firebase Upload Error:', writeErr);
+        return res.status(500).json({ error: 'Failed to upload to cloud storage' });
       }
     });
   });

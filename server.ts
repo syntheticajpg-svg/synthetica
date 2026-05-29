@@ -32,19 +32,26 @@ try {
 let credential: any = undefined;
 if (process.env.FIREBASE_SERVICE_ACCOUNT) {
   try {
-    const sa = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    const rawSa = process.env.FIREBASE_SERVICE_ACCOUNT.trim();
+    // Use base64 if it looks like base64, otherwise parse JSON
+    const sa = (rawSa.startsWith('{')) ? JSON.parse(rawSa) : JSON.parse(Buffer.from(rawSa, 'base64').toString());
     credential = cert(sa);
     console.log("INFO: Initializing Firebase Admin with provided service account credential.");
   } catch (err) {
-    console.error("CRITICAL: Failed to parse FIREBASE_SERVICE_ACCOUNT environment variable. Ensure it is a valid JSON string.");
+    console.error("CRITICAL: Failed to parse FIREBASE_SERVICE_ACCOUNT environment variable. Ensure it is a valid JSON string or Base64 JSON.");
   }
 }
 
+const firebaseOptions: any = {
+  projectId: firebaseConfig.projectId || undefined
+};
+
+if (credential) {
+  firebaseOptions.credential = credential;
+}
+
 const adminApp = getApps().length === 0
-  ? initializeApp({ 
-      credential,
-      projectId: firebaseConfig.projectId || undefined 
-    })
+  ? initializeApp(firebaseOptions)
   : getApp();
 
 const db = firebaseConfig.firestoreDatabaseId

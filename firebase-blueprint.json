@@ -1,0 +1,77 @@
+{
+  "entities": {
+    "Student": {
+      "title": "Student Profile",
+      "description": "User profile containing access permissions, metadata and lecture completion states.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "email": { "type": "string" },
+        "password": { "type": "string" },
+        "fullName": { "type": "string" },
+        "allowedCourses": { "type": "array" },
+        "allowedModules": { "type": "object" },
+        "notes": { "type": "string" },
+        "isMentorshipMember": { "type": "boolean" },
+        "allowedBonusCourses": { "type": "array" },
+        "allowedBonusModules": { "type": "object" },
+        "completedLessons": { "type": "object" }
+      },
+      "required": ["id", "email", "password", "fullName"]
+    },
+    "Submission": {
+      "title": "Module/Lesson Submission",
+      "description": "A student's task or quiz response.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "courseId": { "type": "string" },
+        "moduleId": { "type": "string" },
+        "lessonIndex": { "type": "number" },
+        "lessonTitle": { "type": "string" },
+        "textAnswer": { "type": "string" },
+        "linkAnswer": { "type": "string" },
+        "submittedAt": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "reviewed"] },
+        "reviewComment": { "type": "string" },
+        "reviewRating": { "type": "number" },
+        "read": { "type": "boolean" }
+      },
+      "required": ["id", "studentId", "courseId", "moduleId", "lessonIndex", "lessonTitle", "submittedAt", "status", "read"]
+    },
+    "Admin": {
+      "title": "Administrator Record",
+      "description": "A record verifying whether a user has administrative permission.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" }
+      },
+      "required": ["uid", "email"]
+    }
+  },
+  "firestore": {
+    "/students/{studentId}": {
+      "schema": "Student",
+      "description": "Registered students roster mapped by student auth UID or unique student ID."
+    },
+    "/submissions/{submissionId}": {
+      "schema": "Submission",
+      "description": "Creative practice or test submissions."
+    },
+    "/admins/{adminId}": {
+      "schema": "Admin",
+      "description": "Explicit register of administrative users."
+    },
+    "/site_config/{configId}": {
+      "schema": { "type": "object" },
+      "description": "Public-facing course and block configurations."
+    },
+    "/classroom_config/{configId}": {
+      "schema": { "type": "object" },
+      "description": "Classroom-specific metadata or configurations."
+    }
+  }
+}

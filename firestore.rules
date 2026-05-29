@@ -1,0 +1,102 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Admin bootstrap check with verified email and fallback verification
+    function isAdmin() {
+      return isSignedIn() && (
+        (request.auth.token.email == 'ninaternersk@gmail.com' && request.auth.token.email_verified == true) ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Validations ---
+    function isValidStudent(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.email is string && data.email.size() <= 256 &&
+             data.password is string && data.password.size() <= 128 &&
+             data.fullName is string && data.fullName.size() <= 256;
+    }
+
+    function isValidSubmission(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.studentId is string && data.studentId.size() <= 128 &&
+             data.courseId is string && data.courseId.size() <= 128 &&
+             data.moduleId is string && data.moduleId.size() <= 128 &&
+             data.lessonIndex is int &&
+             data.lessonTitle is string && data.lessonTitle.size() <= 256 &&
+             data.status is string && (data.status == 'pending' || data.status == 'reviewed') &&
+             data.read is bool;
+    }
+
+    // --- Rules for Students collection ---
+    match /students/{studentId} {
+      allow get: if isAdmin() || isOwner(studentId);
+      allow list: if isAdmin();
+      
+      allow create: if isAdmin();
+      allow update: if isAdmin(); 
+      allow delete: if isAdmin();
+    }
+
+    // --- Rules for Submissions collection ---
+    match /submissions/{submissionId} {
+      allow get: if isAdmin() || (isSignedIn() && existing().studentId == request.auth.uid);
+      allow list: if isAdmin() || (isSignedIn() && resource.data.studentId == request.auth.uid);
+
+      allow create: if isSignedIn() && 
+                      isValidId(submissionId) && 
+                      isValidSubmission(incoming()) && 
+                      incoming().studentId == request.auth.uid &&
+                      incoming().status == 'pending' &&
+                      incoming().read == false &&
+                      !(incoming().keys().hasAny(['reviewComment', 'reviewRating']));
+
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // --- Rules for Admins directory ---
+    match /admins/{adminId} {
+      allow read, write: if isAdmin();
+    }
+
+    // --- Rules for site_config collection ---
+    match /site_config/{configId} {
+      allow get: if true;
+      allow write: if isAdmin();
+    }
+
+    // --- Rules for classroom_config collection ---
+    match /classroom_config/{configId} {
+      allow get: if isSignedIn() || isAdmin();
+      allow write: if isAdmin();
+    }
+  }
+}

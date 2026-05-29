@@ -1,0 +1,13 @@
+User-agent: *
+Disallow: /api/
+Disallow: /api/classroom/
+Allow: /
+
+# Specifically tune crawl speed and behavior for Yandex
+User-agent: Yandex
+Disallow: /api/
+Disallow: /api/classroom/
+Allow: /
+Clean-param: pay_item&pay_price /
+
+Sitemap: https://synthetica.art/sitemap.xml

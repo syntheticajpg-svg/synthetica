@@ -1,0 +1,6 @@
+{
+  "name": "Irina Synthetica Portfolio",
+  "description": "Интерактивное генеративное портфолио, оранжерея ИИ-образов и практические мини-курсы Ирины Synthetica по ИИ-брендингу, нейромаркетингу и наставничеству.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -49,8 +49,19 @@ export default function HomeBlockEditorModal({
     if (!file) return;
     setUploading(true);
     try {
+      // Compress image before sending as Base64 to keep Firestore payload small
+      let fileToUpload = file;
+      if (file.type.startsWith('image/')) {
+        try {
+          const { compressImage } = await import("../lib/imageCompression");
+          fileToUpload = await compressImage(file, 0.4); // Target ~400KB
+        } catch (e) {
+          console.warn("Compression failed, uploading original", e);
+        }
+      }
+
       const formData = new FormData();
-      formData.append("image", file);
+      formData.append("image", fileToUpload);
 
       const res = await fetch("/api/upload", {
         method: "POST",

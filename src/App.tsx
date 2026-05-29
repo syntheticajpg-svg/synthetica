@@ -368,10 +368,10 @@ export default function App() {
       const custom = customHomeBlocksConfig[b.id] as any || {};
       return { 
         ...b, 
-        title: custom.title || b.title, 
-        subtitle: custom.subtitle !== undefined ? custom.subtitle : b.subtitle, 
-        image: custom.image !== undefined ? custom.image : b.image, 
-        badge: custom.badge || b.badge, 
+        title: (custom.title !== undefined && custom.title !== "") ? custom.title : b.title, 
+        subtitle: (custom.subtitle !== undefined && custom.subtitle !== "") ? custom.subtitle : b.subtitle, 
+        image: (custom.image !== undefined && custom.image !== "") ? custom.image : b.image, 
+        badge: (custom.badge !== undefined && custom.badge !== "") ? custom.badge : b.badge, 
         customConfig: custom 
       };
     }),

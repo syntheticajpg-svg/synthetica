@@ -203,10 +203,20 @@ export default function CourseBuilder({ course, onClose, customConfig, onSaveCon
                     <input
                       type="text"
                       placeholder="https://images.postimages.org/... / https://..."
-                      className="w-full text-xs p-3.5 border border-neutral-300 focus:outline-none focus:border-neutral-900 bg-white"
+                      className="w-full text-xs p-3.5 pr-12 border border-neutral-300 focus:outline-none focus:border-neutral-900 bg-white"
                       value={coverImage}
                       onChange={(e) => updateCover(e.target.value)}
                     />
+                    {coverImage !== "" && (
+                      <button 
+                        onClick={() => updateCover('')}
+                        type="button"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-neutral-400 hover:text-red-600 transition-colors"
+                        title={language === 'RU' ? 'Очистить' : 'Clear'}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
                   <p className="text-[10px] font-mono text-neutral-400 mt-1.5 leading-relaxed">
                     {language === 'RU' 

@@ -1,13 +1,13 @@
 import imageCompression from 'browser-image-compression';
 
-export const compressImage = async (file: File, maxSizeMB: number = 0.2): Promise<File> => {
+export const compressImage = async (file: File, maxSizeMB: number = 0.1): Promise<File> => {
   if (!file.type.startsWith('image/')) return file; // Skip videos or non-images
 
   const options = {
     maxSizeMB: maxSizeMB,
-    maxWidthOrHeight: 1280,
+    maxWidthOrHeight: 1024,
     useWebWorker: true,
-    initialQuality: 0.8,
+    initialQuality: 0.6,
     fileType: 'image/jpeg'
   };
 

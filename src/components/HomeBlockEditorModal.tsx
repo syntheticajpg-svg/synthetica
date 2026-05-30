@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion } from "motion/react";
-import { X, Plus, Check } from "lucide-react";
+import { X, Plus, Check, Trash2, RotateCcw } from "lucide-react";
 import { PortfolioBlock } from "../types";
 import { compressImage } from "../lib/imageCompression";
 
@@ -178,12 +178,12 @@ export default function HomeBlockEditorModal({
                   <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors pointer-events-none" />
                 </div>
                 <div className="flex-1 space-y-3">
-                  <div className="relative">
+                  <div className="relative group flex items-center">
                     <input
                       type="text"
                       placeholder={language === "RU" ? "https://..." : "https://..."}
-                      className="w-full text-xs p-3 border border-neutral-300 focus:outline-none focus:border-neutral-900 bg-white"
-                      value={conf.image !== undefined ? conf.image : b.image}
+                      className="w-full text-xs p-3 pr-24 border border-neutral-300 focus:outline-none focus:border-neutral-900 bg-white"
+                      value={conf.image !== undefined ? conf.image : (b.image || "")}
                       onChange={(e) =>
                         setLocalConf((prev) => ({
                           ...prev,
@@ -191,18 +191,32 @@ export default function HomeBlockEditorModal({
                         }))
                       }
                     />
-                    {(conf.image !== undefined) && (
-                      <button 
-                         onClick={() => setLocalConf(prev => { 
-                           const n = {...prev}; 
-                           delete n.image; 
-                           return n; 
-                         })}
-                         className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] font-bold text-neutral-400 hover:text-red-500 uppercase font-mono px-2 py-1 bg-neutral-50 border border-neutral-200"
-                      >
-                         {language === "RU" ? "ВОССТАНОВИТЬ" : "REVERT"}
-                      </button>
-                    )}
+                    <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                      {conf.image !== undefined && (
+                        <button 
+                          onClick={() => setLocalConf(prev => { 
+                            const n = {...prev}; 
+                            delete n.image; 
+                            return n; 
+                          })}
+                          type="button"
+                          title={language === "RU" ? "Восстановить оригинал" : "Revert to original"}
+                          className="p-2 text-neutral-400 hover:text-blue-600 transition-colors bg-white border border-neutral-100 shadow-sm"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      {( (conf.image !== undefined && conf.image !== "") || (conf.image === undefined && b.image) ) && (
+                        <button 
+                          onClick={() => setLocalConf(prev => ({...prev, image: ""}))}
+                          type="button"
+                          title={language === "RU" ? "Удалить фото" : "Clear photo"}
+                          className="p-2 text-neutral-400 hover:text-red-500 transition-colors bg-white border border-neutral-100 shadow-sm"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div className="relative">
                     <input
@@ -293,7 +307,7 @@ export default function HomeBlockEditorModal({
                   <div className="flex-1 relative flex items-center">
                     <input
                       type="text"
-                      className="w-full text-xs p-3 border border-neutral-300 bg-white"
+                      className="w-full text-xs p-3 pr-24 border border-neutral-300 bg-white"
                       value={conf.authorImage !== undefined ? conf.authorImage : ""}
                       placeholder={language === "RU" ? "URL или загрузите файл" : "URL or upload file"}
                       onChange={(e) =>
@@ -303,18 +317,32 @@ export default function HomeBlockEditorModal({
                         }))
                       }
                     />
-                    {conf.authorImage !== undefined && (
-                      <button 
-                         onClick={() => setLocalConf(prev => { 
-                           const n = {...prev}; 
-                           delete n.authorImage; 
-                           return n; 
-                         })}
-                         className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] font-bold text-neutral-400 hover:text-red-500 uppercase font-mono px-2 py-1 bg-neutral-50 border border-neutral-200"
-                      >
-                         {language === "RU" ? "СБРОСИТЬ" : "REVERT"}
-                      </button>
-                    )}
+                    <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                      {conf.authorImage !== undefined && (
+                        <button 
+                          onClick={() => setLocalConf(prev => { 
+                            const n = {...prev}; 
+                            delete n.authorImage; 
+                            return n; 
+                          })}
+                          type="button"
+                          title={language === "RU" ? "Восстановить" : "Revert"}
+                          className="p-2 text-neutral-400 hover:text-blue-600 bg-white border border-neutral-100 shadow-sm"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      {conf.authorImage !== "" && conf.authorImage !== undefined && (
+                        <button 
+                          onClick={() => setLocalConf(prev => ({...prev, authorImage: ""}))}
+                          type="button"
+                          title={language === "RU" ? "Удалить" : "Clear"}
+                          className="p-2 text-neutral-400 hover:text-red-600 bg-white border border-neutral-100 shadow-sm"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div className="relative">
                     <input

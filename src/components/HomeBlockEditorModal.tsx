@@ -29,7 +29,7 @@ export default function HomeBlockEditorModal({
     if (block) {
       setLocalConf(customHomeBlocksConfig?.[block.id] || {});
     }
-  }, [block, customHomeBlocksConfig]);
+  }, [block]);
 
   if (!isOpen || !block) return null;
 

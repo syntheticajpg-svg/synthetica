@@ -513,29 +513,25 @@ async function startServer() {
       }
 
       try {
-        // Use ImgBB for reliable image hosting (no API key required for small loads)
-        const base64Data = req.file.buffer.toString('base64');
-        const formData = new FormData();
-        formData.append('image', base64Data);
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        const fileExt = path.extname(req.file.originalname).toLowerCase();
+        const diskFileName = `${req.file.fieldname}-${uniqueSuffix}${fileExt}`;
 
-        const response = await fetch('https://api.imgbb.com/1/upload?key=5f3e970a09e0a0d4c8b2591694f4c856', {
-          method: 'POST',
-          body: formData
-        });
-        const result = await response.json();
-        
-        if (result.success) {
-          const imageUrl = result.data.url;
-          console.log('File successfully uploaded to ImgBB:', imageUrl);
-          return res.json({ url: imageUrl });
-        } else {
-          throw new Error('ImgBB upload failed: ' + result.error.message);
+        // Create public/uploads directory if it doesn't exist
+        const uploadDir = path.join(process.cwd(), 'public', 'uploads');
+        if (!existsSync(uploadDir)) {
+          mkdirSync(uploadDir, { recursive: true });
         }
+
+        const diskPath = path.join(uploadDir, diskFileName);
+        await fs.writeFile(diskPath, req.file.buffer);
+
+        const localUrl = `/uploads/${diskFileName}`;
+        console.log('File successfully saved to local disk storage:', localUrl);
+        return res.json({ url: localUrl });
       } catch (err: any) {
-        console.error('ImgBB upload failed, falling back to Base64:', err);
-        const base64Data = req.file.buffer.toString('base64');
-        const dataUrl = `data:${req.file.mimetype};base64,${base64Data}`;
-        return res.json({ url: dataUrl });
+        console.error('File saving failed:', err);
+        return res.status(500).json({ error: 'Failed to save image' });
       }
     });
   });

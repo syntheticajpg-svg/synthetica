@@ -91,8 +91,17 @@ async function startServer() {
         console.log('File uploaded to Firebase Storage:', publicUrl);
         return res.json({ url: publicUrl });
       } catch (writeErr: any) {
-        console.error('Firebase Upload Error:', writeErr);
-        return res.status(500).json({ error: 'Failed to upload to cloud storage' });
+        console.error('Firebase Upload Error Details:', {
+          message: writeErr.message,
+          code: writeErr.code,
+          stack: writeErr.stack,
+          bucket: bucket.name
+        });
+        return res.status(500).json({ 
+          error: 'Failed to upload to cloud storage',
+          details: writeErr.message,
+          code: writeErr.code
+        });
       }
     });
   });

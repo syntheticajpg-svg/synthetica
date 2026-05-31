@@ -70,7 +70,10 @@ export default function HomeBlockEditorModal({
 
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.error || "Upload failed");
+        const errorMessage = errorData.details 
+          ? `${errorData.error}: ${errorData.details}`
+          : (errorData.error || "Upload failed");
+        throw new Error(errorMessage);
       }
       
       const data = await res.json();

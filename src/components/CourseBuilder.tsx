@@ -46,7 +46,13 @@ export default function CourseBuilder({ course, onClose, customConfig, onSaveCon
         body: formData,
       });
 
-      if (!res.ok) throw new Error("Upload failed");
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        const errorMessage = errorData.details 
+          ? `${errorData.error}: ${errorData.details}`
+          : (errorData.error || "Upload failed");
+        throw new Error(errorMessage);
+      }
       const data = await res.json();
       
       setter(data.url);

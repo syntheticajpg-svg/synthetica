@@ -19,15 +19,9 @@ interface CourseBuilderProps {
 
 export default function CourseBuilder({ course, onClose, customConfig, onSaveConfig, language }: CourseBuilderProps) {
   const defaultCover = course.image;
-  const [coverImage, setCoverImage] = useState<string>(customConfig?.coverImage || "");
+  const [coverImage, setCoverImage] = useState<string>(customConfig?.coverImage || '');
   const [modules, setModules] = useState<CustomModule[]>(customConfig?.modules || []);
   const [isUploading, setIsUploading] = useState(false);
-
-  // Sync with prop changes (e.g. when opening the builder)
-  React.useEffect(() => {
-    setCoverImage(customConfig?.coverImage || "");
-    setModules(customConfig?.modules || []);
-  }, [customConfig]);
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, setter: (val: string) => void) => {
     const file = e.target.files?.[0];
@@ -35,10 +29,13 @@ export default function CourseBuilder({ course, onClose, customConfig, onSaveCon
 
     setIsUploading(true);
     try {
-      // Compress image before upload
-      let fileToUpload: File | Blob = file;
+      let fileToUpload = file;
       if (file.type.startsWith('image/')) {
-        fileToUpload = await compressImage(file);
+        try {
+          fileToUpload = await compressImage(file, 0.5); // Target ~500KB
+        } catch (compErr) {
+          console.warn("Compression failed, using original", compErr);
+        }
       }
 
       const formData = new FormData();
@@ -64,12 +61,13 @@ export default function CourseBuilder({ course, onClose, customConfig, onSaveCon
     e.target.value = '';
   };
 
-  const handleSave = () => {
-    onSaveConfig({ coverImage, modules });
+  const handleUpdate = (newCover: string, newModules: CustomModule[]) => {
+    onSaveConfig({ coverImage: newCover, modules: newModules });
   };
 
   const updateCover = (val: string) => {
     setCoverImage(val);
+    handleUpdate(val, modules);
   };
 
   const addModule = (type: 'theory' | 'practice' | 'test') => {
@@ -95,22 +93,25 @@ export default function CourseBuilder({ course, onClose, customConfig, onSaveCon
       testQuestions: type === 'test' ? [{ id: 'q_' + Date.now(), question: '', options: ['', ''], correctOptionIndex: 0 }] : undefined
     }];
     setModules(newModules);
+    handleUpdate(coverImage, newModules);
   };
 
   const updateModule = (index: number, field: string, value: unknown) => {
     const newModules = [...modules];
     newModules[index] = { ...newModules[index], [field]: value };
     setModules(newModules);
+    handleUpdate(coverImage, newModules);
   };
 
   const removeModule = (index: number) => {
     const newModules = [...modules];
     newModules.splice(index, 1);
     setModules(newModules);
+    handleUpdate(coverImage, newModules);
   };
 
   const handleSaveAndClose = () => {
-    handleSave();
+    handleUpdate(coverImage, modules);
     onClose();
   };
 
@@ -164,32 +165,18 @@ export default function CourseBuilder({ course, onClose, customConfig, onSaveCon
               <div className="space-y-6">
                 <div className="flex flex-col sm:flex-row items-start sm:items-end gap-8">
                   <div className="w-full sm:w-72 aspect-[5/3] bg-neutral-100 relative overflow-hidden border border-neutral-200">
-                    {coverImage ? (
-                      <img src={coverImage} alt="Cover" className="w-full h-full object-cover" />
-                    ) : defaultCover ? (
-                      <img src={defaultCover} alt="Cover" className="w-full h-full object-cover opacity-50" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-[10px] text-neutral-400 font-mono uppercase font-bold">
-                         {language === 'RU' ? 'НЕТ ОБЛОЖКИ' : 'NO COVER'}
-                      </div>
-                    )}
-                    {(coverImage === "" && defaultCover) && (
-                      <div className="absolute top-2 left-2 bg-neutral-900/80 text-white text-[8px] px-1.5 py-0.5 font-mono uppercase">
-                        {language === 'RU' ? 'ОРИГИНАЛ' : 'ORIGINAL'}
-                      </div>
-                    )}
+                    <img src={coverImage || defaultCover || undefined} alt="Cover" className="w-full h-full object-cover" />
                     <div className="absolute inset-0 bg-black/5 pointer-events-none" />
                   </div>
                   <div className="flex flex-col gap-3 w-full sm:w-auto">
                     <label className="cursor-pointer bg-neutral-950 text-white px-6 py-3 text-xs font-mono uppercase font-bold tracking-wider flex items-center justify-center gap-2 hover:bg-neutral-800 transition shadow-sm active:scale-95">
                       <Camera className="w-4 h-4" />
-                      {isUploading ? (language === 'RU' ? 'ЗАГРУЗКА...' : 'UPLOADING...') : (language === 'RU' ? 'ЗАГРУЗИТЬ ФАЙЛ' : 'UPLOAD FILE')}
-                      <input type="file" accept="image/*" className="hidden" disabled={isUploading} onChange={(e) => handleImageUpload(e, updateCover)} />
+                      {language === 'RU' ? 'ЗАГРУЗИТЬ ФАЙЛ' : 'UPLOAD FILE'}
+                      <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, updateCover)} />
                     </label>
                     {coverImage && (
-                      <button onClick={() => updateCover('')} className="bg-red-50 text-red-600 px-4 py-2 text-[10px] font-mono uppercase font-bold border border-red-200 hover:bg-red-100 transition shadow-sm active:scale-95 flex items-center justify-center gap-2">
-                        <Trash2 className="w-3.5 h-3.5" />
-                        {language === 'RU' ? 'СБРОСИТЬ' : 'RESET COVER'}
+                      <button onClick={() => updateCover('')} className="text-red-600 text-[10px] font-mono uppercase font-bold hover:underline self-center sm:self-start">
+                        {language === 'RU' ? 'СБРОСИТЬ КОНФИГУРАЦИЮ' : 'RESET COVER'}
                       </button>
                     )}
                   </div>
@@ -199,25 +186,13 @@ export default function CourseBuilder({ course, onClose, customConfig, onSaveCon
                   <label className="block text-[9px] font-bold text-neutral-500 uppercase tracking-widest font-mono mb-1.5">
                     {language === 'RU' ? 'ИЛИ ПРЯМАЯ ССЫЛКА НА ОБЛОЖКУ (РЕКОМЕНДУЕТСЯ)' : 'OR DIRECT LINK TO COVER (RECOMMENDED)'}
                   </label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      placeholder="https://images.postimages.org/... / https://..."
-                      className="w-full text-xs p-3.5 pr-12 border border-neutral-300 focus:outline-none focus:border-neutral-900 bg-white"
-                      value={coverImage}
-                      onChange={(e) => updateCover(e.target.value)}
-                    />
-                    {coverImage !== "" && (
-                      <button 
-                        onClick={() => updateCover('')}
-                        type="button"
-                        className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-neutral-400 hover:text-red-600 transition-colors"
-                        title={language === 'RU' ? 'Очистить' : 'Clear'}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
+                  <input
+                    type="text"
+                    placeholder="https://images.postimages.org/... / https://..."
+                    className="w-full text-xs p-3.5 border border-neutral-300 focus:outline-none focus:border-neutral-900 bg-white"
+                    value={coverImage}
+                    onChange={(e) => updateCover(e.target.value)}
+                  />
                   <p className="text-[10px] font-mono text-neutral-400 mt-1.5 leading-relaxed">
                     {language === 'RU' 
                       ? '💡 РЕКОМЕНДАЦИЯ: Чтобы обложка не исчезала после обновлений или перезапусков сервера, загрузите картинку на бесплатный фотохостинг (например, Postimages.org, ImgBB.com) и вставьте прямую ссылку сюда.' 

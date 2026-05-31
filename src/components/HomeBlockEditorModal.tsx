@@ -1,8 +1,7 @@
 import { useState, useEffect } from "react";
 import { motion } from "motion/react";
-import { X, Plus, Check, Trash2, RotateCcw } from "lucide-react";
+import { X, Plus, Check } from "lucide-react";
 import { PortfolioBlock } from "../types";
-import { compressImage } from "../lib/imageCompression";
 
 interface HomeBlockEditorModalProps {
   isOpen: boolean;
@@ -26,45 +25,67 @@ export default function HomeBlockEditorModal({
   const [isUploadingAuthor, setIsUploadingAuthor] = useState(false);
 
   useEffect(() => {
-    if (block) {
-      setLocalConf(customHomeBlocksConfig?.[block.id] || {});
+    if (block && isOpen) {
+      // Инициализируем локальное состояние текущим конфигом или пустым объектом
+      const currentConfig = customHomeBlocksConfig?.[block.id] || {};
+      setLocalConf({
+        ...currentConfig,
+        // Гарантируем, что если в конфиге нет значения, мы берем его из самого блока как дефолт
+        image: currentConfig.image !== undefined ? currentConfig.image : (block.image || ""),
+        title: currentConfig.title !== undefined ? currentConfig.title : (block.title || ""),
+        subtitle: currentConfig.subtitle !== undefined ? currentConfig.subtitle : (block.subtitle || ""),
+        badge: currentConfig.badge !== undefined ? currentConfig.badge : (block.badge || ""),
+      });
     }
-  }, [block]);
+  }, [block, customHomeBlocksConfig, isOpen]);
 
   if (!isOpen || !block) return null;
 
-  const b = block;
-  const conf = localConf;
-
-  let defaultT1 = "";
-  let defaultT2 = "";
-  if (b.id === "about_me") {
-    defaultT1 =
-      language === "RU"
-        ? "✦ ОБ АВТОРЕ // ФИЛОСОФИЯ\n«Я вижу нейросети не просто как сухой утилитарный инструмент копирования, а как уникальный холст для раскрытия творческого спектра...»\n\n✦ ПРОФЕССИОНАЛЬНЫЙ ОПЫТ\n3 ГОДА: COO ювелирного бренда\n4 ГОДА: Бренд-айдентика и визуальный синтез\n..."
-        : '✦ ABOUT AUTHOR // PHILOSOPHY\n"I view neural networks not merely as structural tools for imitation..."';
-  } else if (b.id === "services") {
-    defaultT1 =
-      language === "RU"
-        ? "01 Базовый фундамент. Разработка базовой айдентики бренда...\n\n02 Полная система. Сквозная разработка бренд-стратегии..."
-        : "01 Foundation. Core identity package...";
-    defaultT2 =
-      language === "RU"
-        ? "КАЛЬКУЛЯТОР СТОИМОСТИ (Или опишите цены текстом)"
-        : "PRICING CALCULATOR (Or describe pricing in text)";
-  } else if (b.id === "course_midjourney") {
-    defaultT1 =
-      language === "RU"
-        ? "О КУРСЕ // «FAKE IT. SHAKE IT!»\nКомплексный образовательный трек, направленный на создание коммерческого и творческого контента фотореалистичного качества. Программа идеально подойдет как новичкам для уверенного старта, так и опытным специалистам для углубления своих профессиональных навыков...\n\nДОСТИЖЕНИЯ:\n- Создание реалистичных AI-моделей\n- Создание гиперреалистичных локаций..."
-        : "ABOUT THE COURSE\nA comprehensive curriculum...";
-    defaultT2 =
-      language === "RU"
-        ? "ПРОГРАММА И СОДЕРЖАНИЕ\nМОДУЛЬ 01 // ВВЕДЕНИЕ\nМОДУЛЬ 02 // ОСНОВЫ...\n"
-        : "SYLLABUS\nMODULE 01...";
-  }
-
   const handleSave = () => {
     onSave(localConf);
+  };
+
+  const handleFileUpload = async (file: File, field: string, setUploading: (v: boolean) => void) => {
+    if (!file) return;
+    setUploading(true);
+    try {
+      // Compress image before sending to Firebase Storage to reduce bandwidth
+      let fileToUpload = file;
+      if (file.type.startsWith('image/')) {
+        try {
+          const { compressImage } = await import("../lib/imageCompression");
+          fileToUpload = await compressImage(file, 0.4); // Target ~400KB
+        } catch (e) {
+          console.warn("Compression failed, uploading original", e);
+        }
+      }
+
+      const formData = new FormData();
+      formData.append("image", fileToUpload);
+
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || "Upload failed");
+      }
+      
+      const data = await res.json();
+      if (data.url) {
+        setLocalConf((prev) => ({
+          ...prev,
+          [field]: data.url,
+        }));
+      }
+    } catch (err: any) {
+      console.error("Upload failed:", err);
+      alert((language === "RU" ? "Ошибка загрузки: " : "Upload failed: ") + err.message);
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
@@ -81,489 +102,151 @@ export default function HomeBlockEditorModal({
         className="bg-white max-w-4xl w-full max-h-[90vh] flex flex-col relative shadow-2xl border border-neutral-300 overflow-hidden"
       >
         <header className="border-b border-neutral-200 bg-neutral-50 px-6 py-4 flex justify-between items-center shrink-0">
-          <div>
-            <h2 className="text-sm font-mono font-black text-neutral-900 uppercase">
-              {language === "RU" ? "РЕДАКТОР КАРТОЧКИ: " : "CARD EDITOR: "} {b.title}
-            </h2>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 transition-colors border border-neutral-200"
-          >
+          <h2 className="text-sm font-mono font-black text-neutral-900 uppercase">
+            {language === "RU" ? "РЕДАКТОР КАРТОЧКИ: " : "CARD EDITOR: "} {block.title}
+          </h2>
+          <button onClick={onClose} className="p-2 hover:bg-neutral-200 transition-colors">
             <X className="w-4 h-4" />
           </button>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-8 font-mono w-full scrollbar-thin scrollbar-thumb-neutral-300">
+        <div className="flex-1 overflow-y-auto p-8 font-mono w-full">
           <div className="max-w-2xl mx-auto space-y-6">
+            {/* Badge */}
             <div>
-              <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider block mb-1.5">
-                {language === "RU" ? "Значок / Бейдж (вверху слева)" : "Badge Label"}
+              <label className="text-[10px] font-bold text-neutral-500 uppercase block mb-1">
+                {language === "RU" ? "Значок / Бейдж" : "Badge Label"}
               </label>
               <input
                 type="text"
-                className="w-full text-xs p-3 border border-neutral-300 focus:outline-none focus:border-neutral-900"
-                value={conf.badge ?? b.badge ?? ""}
-                onChange={(e) =>
-                  setLocalConf((prev) => ({
-                    ...prev,
-                    badge: e.target.value,
-                  }))
-                }
+                className="w-full text-xs p-3 border border-neutral-300 focus:border-neutral-900 outline-none"
+                value={localConf.badge || ""}
+                onChange={(e) => setLocalConf(prev => ({ ...prev, badge: e.target.value }))}
               />
             </div>
+
+            {/* Title */}
             <div>
-              <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider block mb-1.5">
-                {language === "RU" ? "Название блока (Title)" : "Block Title"}
+              <label className="text-[10px] font-bold text-neutral-500 uppercase block mb-1">
+                {language === "RU" ? "Название" : "Title"}
               </label>
               <input
                 type="text"
-                className="w-full text-xs p-3 border border-neutral-300 focus:outline-none focus:border-neutral-900"
-                value={conf.title ?? b.title}
-                onChange={(e) =>
-                  setLocalConf((prev) => ({
-                    ...prev,
-                    title: e.target.value,
-                  }))
-                }
+                className="w-full text-xs p-3 border border-neutral-300 focus:border-neutral-900 outline-none"
+                value={localConf.title || ""}
+                onChange={(e) => setLocalConf(prev => ({ ...prev, title: e.target.value }))}
               />
             </div>
+
+            {/* Subtitle */}
             <div>
-              <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider block mb-1.5">
-                {language === "RU" ? "Описание блока (Subtitle)" : "Block Subtitle"}
+              <label className="text-[10px] font-bold text-neutral-500 uppercase block mb-1">
+                {language === "RU" ? "Описание" : "Subtitle"}
               </label>
               <textarea
                 rows={3}
-                className="w-full text-xs p-3 border border-neutral-300 focus:outline-none focus:border-neutral-900"
-                value={conf.subtitle ?? b.subtitle}
-                onChange={(e) =>
-                  setLocalConf((prev) => ({
-                    ...prev,
-                    subtitle: e.target.value,
-                  }))
-                }
+                className="w-full text-xs p-3 border border-neutral-300 focus:border-neutral-900 outline-none"
+                value={localConf.subtitle || ""}
+                onChange={(e) => setLocalConf(prev => ({ ...prev, subtitle: e.target.value }))}
               />
             </div>
+
+            {/* Main Image */}
             <div className="pt-4 border-t border-neutral-100">
-              <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider block mb-1.5">
-                {language === "RU" ? "Обложка (URL или Загрузка)" : "Cover Media (URL or Upload)"}
+              <label className="text-[10px] font-bold text-neutral-500 uppercase block mb-2">
+                {language === "RU" ? "Обложка (URL или файл)" : "Cover Media (URL or File)"}
               </label>
-              <div className="flex gap-4 items-start">
-                <div className="shrink-0 w-24 h-24 border border-neutral-300 bg-neutral-900 overflow-hidden relative group">
-                  {((conf.image !== undefined ? conf.image : b.image) && (conf.image !== "")) ? (
-                    (conf.image !== undefined && conf.image !== "" ? conf.image : b.image).toLowerCase().match(/\.(mp4|webm|mov)$/) ? (
-                      <video
-                        src={conf.image !== undefined && conf.image !== "" ? conf.image : b.image}
-                        key={conf.image !== undefined && conf.image !== "" ? conf.image : b.image}
-                        className="w-full h-full object-cover transition-transform group-hover:scale-105"
-                        autoPlay
-                        muted
-                        loop
-                        playsInline
-                      />
+              <div className="flex gap-4">
+                <div className="w-24 h-24 bg-neutral-100 border border-neutral-300 relative overflow-hidden shrink-0">
+                  {localConf.image && (
+                    localConf.image.match(/\.(mp4|webm|mov)/i) ? (
+                      <video src={localConf.image} className="w-full h-full object-cover" autoPlay muted loop />
                     ) : (
-                      <img
-                        src={conf.image !== undefined && conf.image !== "" ? conf.image : b.image}
-                        key={conf.image !== undefined && conf.image !== "" ? conf.image : b.image}
-                        className="w-full h-full object-cover transition-transform group-hover:scale-105"
-                        alt="Preview"
-                        referrerPolicy="no-referrer"
-                      />
+                      <img src={localConf.image} className="w-full h-full object-cover" alt="Preview" />
                     )
-                  ) : (
-                    <div className="w-full h-full flex flex-col items-center justify-center text-[8px] text-white/50 bg-neutral-900 p-2 text-center uppercase font-bold">
-                      {language === "RU" ? "НЕТ ФОТО" : "NO PHOTO"}
-                    </div>
                   )}
-                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors pointer-events-none" />
                 </div>
-                <div className="flex-1 space-y-3">
-                  <div className="relative group flex items-center">
-                    <input
-                      type="text"
-                      placeholder={language === "RU" ? "https://..." : "https://..."}
-                      className="w-full text-xs p-3 pr-24 border border-neutral-300 focus:outline-none focus:border-neutral-900 bg-white"
-                      value={conf.image !== undefined ? conf.image : (b.image || "")}
-                      onChange={(e) =>
-                        setLocalConf((prev) => ({
-                          ...prev,
-                          image: e.target.value,
-                        }))
-                      }
-                    />
-                    <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                      {conf.image !== undefined && (
-                        <button 
-                          onClick={() => setLocalConf(prev => { 
-                            const n = {...prev}; 
-                            delete n.image; 
-                            return n; 
-                          })}
-                          type="button"
-                          title={language === "RU" ? "Восстановить оригинал" : "Revert to original"}
-                          className="p-2 text-neutral-400 hover:text-blue-600 transition-colors bg-white border border-neutral-100 shadow-sm"
-                        >
-                          <RotateCcw className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                      {( (conf.image !== undefined && conf.image !== "") || (conf.image === undefined && b.image) ) && (
-                        <button 
-                          onClick={() => setLocalConf(prev => ({...prev, image: ""}))}
-                          type="button"
-                          title={language === "RU" ? "Удалить фото" : "Clear photo"}
-                          className="p-2 text-neutral-400 hover:text-red-500 transition-colors bg-white border border-neutral-100 shadow-sm"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
+                <div className="flex-1 space-y-2">
+                  <input
+                    type="text"
+                    className="w-full text-xs p-3 border border-neutral-300 outline-none"
+                    placeholder="https://..."
+                    value={localConf.image || ""}
+                    onChange={(e) => setLocalConf(prev => ({ ...prev, image: e.target.value }))}
+                  />
                   <div className="relative">
                     <input
                       type="file"
-                      accept="image/png, image/jpeg, image/webp, video/mp4, video/webm, video/quicktime"
-                      className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10"
+                      className="absolute inset-0 opacity-0 cursor-pointer z-10"
+                      accept="image/*,video/*"
                       disabled={isUploading}
-                      onChange={async (e) => {
+                      onChange={(e) => {
                         const file = e.target.files?.[0];
-                        if (!file) return;
-
-                        setIsUploading(true);
-                        try {
-                          // Compress image if it's an image
-                          let fileToUpload: File | Blob = file;
-                          if (file.type.startsWith('image/')) {
-                            fileToUpload = await compressImage(file);
-                          }
-
-                          const formData = new FormData();
-                          formData.append("image", fileToUpload);
-
-                          const res = await fetch("/api/upload", {
-                            method: "POST",
-                            body: formData,
-                          });
-
-                          if (!res.ok) throw new Error("Upload failed");
-                          const data = await res.json();
-                          
-                          setLocalConf((prev) => ({
-                            ...prev,
-                            image: data.url,
-                          }));
-                          setIsUploading(false);
-                        } catch (err) {
-                          console.error("Upload failed", err);
-                          alert(language === "RU" ? "Ошибка загрузки" : "Upload failed");
-                          setIsUploading(false);
-                        }
+                        if (file) handleFileUpload(file, "image", setIsUploading);
                         e.target.value = "";
                       }}
                     />
-                    <button className="h-full px-4 bg-neutral-900 text-white text-[10px] font-mono font-bold uppercase tracking-wider flex items-center gap-2 whitespace-nowrap min-h-[42px] disabled:opacity-50">
-                      <Plus className="w-3 h-3" />
-                      {isUploading
-                        ? language === "RU"
-                          ? "ЗАГРУЗКА..."
-                          : "UPLOADING..."
-                        : language === "RU"
-                          ? "МЕДИА ФАЙЛ"
-                          : "MEDIA FILE"}
+                    <button className="w-full py-2 bg-neutral-900 text-white text-[10px] uppercase font-bold disabled:opacity-50">
+                      {isUploading ? (language === "RU" ? "ЗАГРУЗКА..." : "UPLOADING...") : (language === "RU" ? "ВЫБРАТЬ ФАЙЛ" : "SELECT FILE")}
                     </button>
                   </div>
                 </div>
               </div>
             </div>
-            <p className="text-[9px] text-neutral-400 mt-2 font-mono uppercase">
-              {language === "RU"
-                ? "PNG, JPG, WEBP или MP4/MOV видео (до 100MB)"
-                : "PNG, JPG, WEBP or MP4/MOV video (up to 100MB)"}
-            </p>
-            <p className="text-[9px] text-neutral-400 mt-1">
-              {language === "RU"
-                ? "Для видео используйте ссылку, оканчивающуюся на .mp4"
-                : "For video, use a URL ending in .mp4"}
-            </p>
 
-            {b.id === "about_me" && (
-              <div className="mt-6 pt-4 border-t border-neutral-150">
-                <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider block mb-1.5">
-                  {language === "RU"
-                    ? "Фото внутри модального окна (Автор)"
-                    : "Inner Modal Photo (Author)"}
+            {/* Author Image (only for about_me) */}
+            {block.id === "about_me" && (
+              <div className="pt-4 border-t border-neutral-100">
+                <label className="text-[10px] font-bold text-neutral-500 uppercase block mb-2">
+                  {language === "RU" ? "Фото автора" : "Author Photo"}
                 </label>
-                <div className="flex gap-2">
-                  <div className="shrink-0 w-12 h-12 border border-neutral-300 bg-neutral-900 overflow-hidden relative">
-                    {((conf.authorImage !== undefined && conf.authorImage !== "") ? conf.authorImage : (conf.authorImage === "" ? null : undefined)) && (
-                      <img
-                        src={conf.authorImage !== undefined && conf.authorImage !== "" ? conf.authorImage : ""}
-                        key={conf.authorImage !== undefined && conf.authorImage !== "" ? conf.authorImage : ""}
-                        className="w-full h-full object-cover"
-                        alt="Preview"
-                        referrerPolicy="no-referrer"
-                      />
+                <div className="flex gap-4">
+                  <div className="w-16 h-16 bg-neutral-100 border border-neutral-300 relative overflow-hidden shrink-0">
+                    {localConf.authorImage && (
+                      <img src={localConf.authorImage} className="w-full h-full object-cover" alt="Author" />
                     )}
                   </div>
-                  <div className="flex-1 relative flex items-center">
+                  <div className="flex-1 space-y-2">
                     <input
                       type="text"
-                      className="w-full text-xs p-3 pr-24 border border-neutral-300 bg-white"
-                      value={conf.authorImage !== undefined ? conf.authorImage : ""}
-                      placeholder={language === "RU" ? "URL или загрузите файл" : "URL or upload file"}
-                      onChange={(e) =>
-                        setLocalConf((prev) => ({
-                          ...prev,
-                          authorImage: e.target.value,
-                        }))
-                      }
+                      className="w-full text-xs p-3 border border-neutral-300 outline-none"
+                      placeholder="https://..."
+                      value={localConf.authorImage || ""}
+                      onChange={(e) => setLocalConf(prev => ({ ...prev, authorImage: e.target.value }))}
                     />
-                    <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                      {conf.authorImage !== undefined && (
-                        <button 
-                          onClick={() => setLocalConf(prev => { 
-                            const n = {...prev}; 
-                            delete n.authorImage; 
-                            return n; 
-                          })}
-                          type="button"
-                          title={language === "RU" ? "Восстановить" : "Revert"}
-                          className="p-2 text-neutral-400 hover:text-blue-600 bg-white border border-neutral-100 shadow-sm"
-                        >
-                          <RotateCcw className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                      {conf.authorImage !== "" && conf.authorImage !== undefined && (
-                        <button 
-                          onClick={() => setLocalConf(prev => ({...prev, authorImage: ""}))}
-                          type="button"
-                          title={language === "RU" ? "Удалить" : "Clear"}
-                          className="p-2 text-neutral-400 hover:text-red-600 bg-white border border-neutral-100 shadow-sm"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
+                    <div className="relative">
+                      <input
+                        type="file"
+                        className="absolute inset-0 opacity-0 cursor-pointer z-10"
+                        accept="image/*"
+                        disabled={isUploadingAuthor}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) handleFileUpload(file, "authorImage", setIsUploadingAuthor);
+                          e.target.value = "";
+                        }}
+                      />
+                      <button className="w-full py-2 bg-neutral-800 text-white text-[10px] uppercase font-bold disabled:opacity-50">
+                        {isUploadingAuthor ? (language === "RU" ? "ЗАГРУЗКА..." : "UPLOADING...") : (language === "RU" ? "ВЫБРАТЬ ФОТО" : "SELECT PHOTO")}
+                      </button>
                     </div>
                   </div>
-                  <div className="relative">
-                    <input
-                      type="file"
-                      accept="image/png, image/jpeg, image/webp"
-                      className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10"
-                      disabled={isUploadingAuthor}
-                      onChange={async (e) => {
-                        const file = e.target.files?.[0];
-                        if (!file) return;
-
-                        setIsUploadingAuthor(true);
-                        try {
-                          // Compress image if it's an image
-                          let fileToUpload: File | Blob = file;
-                          if (file.type.startsWith('image/')) {
-                            fileToUpload = await compressImage(file);
-                          }
-
-                          const formData = new FormData();
-                          formData.append("image", fileToUpload);
-
-                          const res = await fetch("/api/upload", {
-                            method: "POST",
-                            body: formData,
-                          });
-
-                          if (!res.ok) throw new Error("Upload failed");
-                          const data = await res.json();
-
-                          setLocalConf((prev) => ({
-                            ...prev,
-                            authorImage: data.url,
-                          }));
-                          setIsUploadingAuthor(false);
-                        } catch (err) {
-                          console.error("Upload failed", err);
-                          alert(language === "RU" ? "Ошибка загрузки" : "Upload failed");
-                          setIsUploadingAuthor(false);
-                        }
-                        e.target.value = "";
-                      }}
-                    />
-                    <button className="h-full px-4 bg-indigo-600 text-white text-[10px] font-mono font-bold uppercase tracking-wider flex items-center gap-2 whitespace-nowrap min-h-[42px] disabled:opacity-50">
-                      <Plus className="w-3 h-3" />
-                      {isUploadingAuthor
-                        ? language === "RU"
-                          ? "ЗАГРУЗКА..."
-                          : "UPLOADING..."
-                        : language === "RU"
-                          ? "ФАЙЛ АВТОРА"
-                          : "AUTHOR FILE"}
-                    </button>
-                  </div>
                 </div>
-                <p className="text-[9px] text-neutral-400 mt-2 font-mono uppercase">
-                  {language === "RU" ? "Для фото Ирины внутри блока" : "For Irina's photo inside the block"}
-                </p>
               </div>
             )}
-
-            <div>
-              <label className="flex items-center gap-2 cursor-pointer mt-1">
-                <input
-                  type="checkbox"
-                  checked={conf.videoAutoplay !== false}
-                  onChange={(e) =>
-                    setLocalConf((prev) => ({
-                      ...prev,
-                      videoAutoplay: e.target.checked,
-                    }))
-                  }
-                />
-                <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider">
-                  {language === "RU"
-                    ? "Если видео: всегда автовоспроизведение (иначе только при наведении)"
-                    : "If video: always autopilot (otherwise hover only)"}
-                </span>
-              </label>
-            </div>
-
-            {b.isCourse && (
-              <div className="pt-6 border-t border-neutral-200">
-                <label className="text-[10px] font-bold text-[#0284c7] uppercase tracking-wider block mb-1.5">
-                  {language === "RU"
-                    ? "Внутреннее содержимое: Стоимость (При наличии)"
-                    : "Inner Content: Price (If applicable)"}
-                </label>
-                <input
-                  type="text"
-                  className="w-full text-xs p-3 border border-neutral-300"
-                  placeholder={language === "RU" ? "Например: $150 USD или Бесплатно" : "e.g. $150 USD or Free"}
-                  value={conf.customPrice ?? ""}
-                  onChange={(e) =>
-                    setLocalConf((prev) => ({
-                      ...prev,
-                      customPrice: e.target.value,
-                    }))
-                  }
-                />
-              </div>
-            )}
-
-            <div>
-              <label className="text-[10px] font-bold text-[#0284c7] uppercase tracking-wider block mb-1.5">
-                {language === "RU"
-                  ? "Внутреннее содержимое: Общий текст (опционально)"
-                  : "Inner text content (optional)"}
-              </label>
-              <textarea
-                rows={4}
-                className="w-full text-xs p-3 border border-neutral-300"
-                placeholder={
-                  language === "RU"
-                    ? "Введите текст, который заменит стандартное описание внутри модального окна. Поддерживает переносы строк."
-                    : "Enter text to replace default modal description. Supports newlines."
-                }
-                value={conf.customModalText ?? ""}
-                onChange={(e) =>
-                  setLocalConf((prev) => ({
-                    ...prev,
-                    customModalText: e.target.value,
-                  }))
-                }
-              />
-            </div>
-
-            <div className="pt-6 border-t border-neutral-200">
-              <div className="flex justify-between items-center mb-4">
-                <h4 className="text-[10px] font-bold text-neutral-900 uppercase tracking-wider">
-                  {language === "RU" ? "ЗАМЕНА ВНУТРЕННИХ ВКЛАДОК (ОПЦИОНАЛЬНО)" : "CUSTOM TABS OVERRIDE"}
-                </h4>
-              </div>
-              <div className="space-y-4">
-                <div>
-                  <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider block mb-1.5">
-                    {language === "RU" ? "Название Вкладки 1" : "Tab 1 Name"}
-                  </label>
-                  <input
-                    type="text"
-                    className="w-full text-xs p-3 border border-neutral-300"
-                    placeholder={language === "RU" ? "О Компании" : "About"}
-                    value={conf.tab1Name ?? ""}
-                    onChange={(e) =>
-                      setLocalConf((prev) => ({
-                        ...prev,
-                        tab1Name: e.target.value,
-                      }))
-                    }
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider block mb-1.5">
-                    {language === "RU" ? "Содержимое Вкладки 1 (Текст)" : "Tab 1 Content"}
-                  </label>
-                  <textarea
-                    rows={6}
-                    className="w-full text-xs p-3 border border-neutral-300"
-                    placeholder={language === "RU" ? "Содержимое первой вкладки..." : "Content for first tab..."}
-                    value={conf.tab1Content !== undefined ? conf.tab1Content : defaultT1}
-                    onChange={(e) =>
-                      setLocalConf((prev) => ({
-                        ...prev,
-                        tab1Content: e.target.value,
-                      }))
-                    }
-                  />
-                </div>
-
-                <div className="pt-4 border-t border-dashed border-neutral-200">
-                  <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider block mb-1.5">
-                    {language === "RU" ? "Название Вкладки 2" : "Tab 2 Name"}
-                  </label>
-                  <input
-                    type="text"
-                    className="w-full text-xs p-3 border border-neutral-300"
-                    placeholder={language === "RU" ? "Услуги" : "Services"}
-                    value={conf.tab2Name ?? ""}
-                    onChange={(e) =>
-                      setLocalConf((prev) => ({
-                        ...prev,
-                        tab2Name: e.target.value,
-                      }))
-                    }
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider block mb-1.5">
-                    {language === "RU" ? "Содержимое Вкладки 2 (Текст)" : "Tab 2 Content"}
-                  </label>
-                  <textarea
-                    rows={6}
-                    className="w-full text-xs p-3 border border-neutral-300"
-                    placeholder={language === "RU" ? "Содержимое второй вкладки..." : "Content for second tab..."}
-                    value={conf.tab2Content !== undefined ? conf.tab2Content : defaultT2}
-                    onChange={(e) =>
-                      setLocalConf((prev) => ({
-                        ...prev,
-                        tab2Content: e.target.value,
-                      }))
-                    }
-                  />
-                </div>
-              </div>
-            </div>
           </div>
         </div>
 
-        <footer className="shrink-0 border-t border-neutral-200 bg-neutral-50 px-6 py-4 flex justify-end gap-3 font-mono">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-xs border border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-100 uppercase tracking-wider font-bold transition-all"
-          >
-            {language === "RU" ? "Отмена" : "Cancel"}
+        <footer className="p-6 border-t border-neutral-200 bg-neutral-50 flex justify-end gap-3">
+          <button onClick={onClose} className="px-6 py-2 border border-neutral-300 text-[10px] font-bold uppercase">
+            {language === "RU" ? "ОТМЕНА" : "CANCEL"}
           </button>
           <button
             onClick={handleSave}
-            className="px-5 py-2 text-xs bg-neutral-900 border border-neutral-900 text-white hover:bg-neutral-800 uppercase tracking-wider font-bold flex items-center gap-1.5 transition-all shadow-sm"
+            className="px-8 py-2 bg-neutral-900 text-white text-[10px] font-bold uppercase flex items-center gap-2"
           >
-            <Check className="w-3.5 h-3.5" />
-            {language === "RU" ? "Сохранить" : "Save"}
+            <Check className="w-3 h-3" />
+            {language === "RU" ? "СОХРАНИТЬ" : "SAVE"}
           </button>
         </footer>
       </motion.div>
